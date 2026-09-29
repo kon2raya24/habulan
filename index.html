@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Habulan sa Palengke</title>
+<meta name="description" content="A maze chase, Pinoy style: eat all the pan de sal while four tsismosa titas chase you through the palengke. Grab Nanay's tsinelas and turn the chase around.">
+<meta property="og:title" content="Habulan sa Palengke">
+<meta property="og:description" content="Eat the pan de sal, dodge the titas, grab Nanay's tsinelas.">
+<meta property="og:image" content="https://habulan.vercel.app/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0d0a12">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Habulan">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+:root { --bg: #0d0a12; --ink: #fff8e1; --muted: #d9c9e6; --yellow: #ffd166; --pink: #ff7eb6; --teal: #4dd0e1; color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; color: var(--ink); font: 16px/1.45 "Baloo 2", system-ui, -apple-system, "Segoe UI", sans-serif; }
+body { background: radial-gradient(ellipse at 50% 0%, #2d1b3d 0%, #140c1c 55%, #07050a 100%) fixed; background-color: var(--bg); }
+.wrap { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 16px; gap: 8px; }
+.stage { position: relative; width: min(100%, 520px, calc((100vh - 40px) * 448 / 574)); aspect-ratio: 448 / 574; touch-action: none; user-select: none; -webkit-user-select: none; border-radius: 10px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,.6), 0 0 0 2px rgba(255,209,102,.25); }
+body.touch.playing .stage { width: min(100%, 520px, calc((100vh - 190px) * 448 / 574)); }
+canvas { display: block; width: 100%; height: 100%; }
+.screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: 10px; padding: 18px; text-align: center; background: rgba(13, 10, 18, 0.86); overflow-y: auto; }
+.screen[hidden], .corner[hidden], .toast[hidden] { display: none !important; }
+.logo { margin: 0; font-size: clamp(38px, 11vw, 60px); line-height: .95; font-weight: 800; color: var(--yellow); text-shadow: 0 5px 0 #8a4b1a, 0 0 30px rgba(255,209,102,.35); }
+.logo small { display: block; font-size: .45em; color: var(--pink); text-shadow: none; letter-spacing: .06em; }
+.tag { margin: 0; color: var(--muted); max-width: 28em; }
+h2 { margin: 0; font-size: clamp(24px, 6vw, 34px); color: var(--yellow); line-height: 1.1; }
+.row, .modes { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+button { font: inherit; font-weight: 700; color: var(--ink); background: rgba(70, 30, 90, .85); border: 2px solid rgba(255, 209, 102, .5); border-radius: 12px; padding: 8px 16px; cursor: pointer; min-height: 44px; }
+button:hover { background: rgba(100, 40, 120, .95); }
+button:focus-visible { outline: 3px solid var(--pink); outline-offset: 2px; }
+button.primary { background: var(--yellow); color: #2a0f3a; border-color: var(--yellow); box-shadow: 0 4px 0 #b58f00; }
+button.sound { min-width: 44px; padding: 6px 10px; font-size: 18px; }
+.modes button { min-height: 38px; padding: 4px 14px; font-size: 15px; }
+.modes button[aria-pressed=true] { background: var(--pink); color: #2a0f3a; border-color: var(--pink); }
+.muted { color: var(--muted); margin: 0; font-size: 14px; }
+.cast { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; text-align: left; font-size: 14px; }
+.cast li::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--c); margin-right: 6px; }
+.cast b { color: var(--c); }
+.keys { color: var(--muted); font-size: 13px; margin: 0; }
+kbd { background: #3a1650; border: 1px solid #6a3a80; border-radius: 4px; padding: 0 6px; font: 12px ui-monospace, monospace; }
+.score { font-size: clamp(44px, 12vw, 64px); font-weight: 800; color: var(--yellow); line-height: 1; }
+.new { color: var(--pink); font-weight: 800; }
+.toast { position: absolute; left: 50%; top: 10%; transform: translateX(-50%); background: rgba(13, 10, 18, .94); border: 2px solid var(--yellow); border-radius: 12px; padding: 6px 14px; font-weight: 700; font-size: 14px; pointer-events: none; width: max-content; max-width: 90%; text-align: center; z-index: 3; }
+.corner button { min-height: 28px; padding: 0 10px; font-size: 12px; background: rgba(13,10,18,.7); }
+.pad { display: none; grid-template-columns: repeat(3, 62px); grid-template-rows: repeat(2, 56px); gap: 6px; }
+body.touch.playing .pad { display: grid; }
+.pad button { padding: 0; font-size: 22px; border-radius: 14px; background: rgba(70, 30, 90, .7); }
+.pad [data-dir="0"] { grid-column: 2; grid-row: 1; } .pad [data-dir="1"] { grid-column: 1; grid-row: 2; } .pad [data-dir="2"] { grid-column: 2; grid-row: 2; } .pad [data-dir="3"] { grid-column: 3; grid-row: 2; }
+.help { color: var(--muted); font-size: 13px; margin: 0; text-align: center; }
+.help a { color: var(--yellow); }
+@media (max-width: 560px) { .screen { position: fixed; inset: 8px; z-index: 5; border-radius: 14px; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="stage" id="stage">
+    <canvas id="board" width="448" height="574" role="img" aria-label="A palengke maze with pan de sal, a hungry bata, and four titas"></canvas>
+    <div class="toast" id="toast" role="status" hidden></div>
+
+    <section class="screen" id="title">
+      <h1 class="logo">HABULAN<small>sa Palengke</small></h1>
+      <p class="tag">Eat all the pan de sal while four tsismosa titas chase you through the palengke. Grab Nanay's tsinelas and turn the chase around!</p>
+      <div class="modes" role="group" aria-label="Difficulty">
+        <button type="button" data-diff="madali">Madali</button>
+        <button type="button" data-diff="katamtaman">Katamtaman</button>
+        <button type="button" data-diff="mahirap">Mahirap</button>
+      </div>
+      <p class="muted" id="diff-note"></p>
+      <div class="row">
+        <button type="button" class="primary" id="play">Laro na! · Play</button>
+        <button type="button" class="sound"></button>
+      </div>
+      <p class="muted" id="title-best"></p>
+      <ul class="cast" id="cast"></ul>
+      <p class="muted">Palengke, Simbahan and Mall mazes · fruit bonuses: saging, mangga, lanzones, balut, bibingka, lechon</p>
+      <p class="keys"><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> or swipe · <kbd>P</kbd> pause · <kbd>M</kbd> sound</p>
+    </section>
+
+    <section class="screen" id="pause" hidden>
+      <h2>Hinto · Paused</h2>
+      <div class="row">
+        <button type="button" class="primary" id="resume">Tuloy · Resume</button>
+        <button type="button" class="sound"></button>
+        <button type="button" class="menu">Menu</button>
+      </div>
+    </section>
+
+    <section class="screen" id="level" hidden aria-live="polite">
+      <h2 id="level-title"></h2>
+      <p class="tag" id="level-next"></p>
+      <p class="muted" id="level-blurb"></p>
+    </section>
+
+    <section class="screen" id="over" hidden>
+      <h2>Nahuli ka! · Game over</h2>
+      <div class="score" id="over-score"></div>
+      <p id="over-best"></p>
+      <p class="muted" id="over-stats"></p>
+      <div class="row">
+        <button type="button" class="primary" id="retry">Ulit! · Play again</button>
+        <button type="button" class="menu">Menu</button>
+      </div>
+    </section>
+  </div>
+  <div class="pad" aria-label="Direction pad">
+    <button type="button" data-dir="0" aria-label="Up">▲</button>
+    <button type="button" data-dir="1" aria-label="Left">◀</button>
+    <button type="button" data-dir="2" aria-label="Down">▼</button>
+    <button type="button" data-dir="3" aria-label="Right">▶</button>
+  </div>
+  <div class="corner" id="pause-btn" hidden><button type="button" aria-label="Pause">❚❚ Hinto</button></div>
+  <p class="help">A maze chase by <a href="https://kon2raya.netlify.app" target="_blank" rel="noopener">Lemmuel Turaya</a> · the titas are fictional · <a href="https://tambayan-arcade.vercel.app/">More games</a> · <a href="https://tambayan-arcade.vercel.app/#support">☕ Support</a></p>
+</main>
+<script>if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch');</script>
+<script type="module" src="src/main.mjs"></script>
+</body>
+</html>
