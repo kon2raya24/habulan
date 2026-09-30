@@ -1,10 +1,12 @@
-// Offline play: the game's own files are cached on install and served cache-first; the webfont is
-// cached the first time it loads. Bump VERSION whenever a file changes so players get the update.
-const VERSION = 'habulan-v1';
+// Offline play: the game's own files (three.js and the sounds included) are cached on install and served
+// cache-first; the webfonts and the optional scanned surfaces in assets/env are cached the first time they load. Bump VERSION whenever a file changes so players get the update.
+const VERSION = 'habulan-v2';
 const ASSETS = [
-  './', 'index.html', 'manifest.webmanifest',
-  'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
-  'src/main.mjs', 'src/game.mjs', 'src/render.mjs', 'src/audio.mjs', 'src/bot.mjs', 'src/rng.mjs', 'src/maps.mjs',
+  './', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'assets/env/env.json',
+  'src/audio.mjs', 'src/bot.mjs', 'src/cast3d.mjs', 'src/envpack.mjs', 'src/food3d.mjs', 'src/game.mjs', 'src/kit3d.mjs', 'src/main.mjs',
+  'src/maps.mjs', 'src/post.mjs', 'src/render.mjs', 'src/rng.mjs', 'src/tex.mjs', 'src/view3d.mjs', 'src/world3d.mjs', 'src/vendor/three-fx.min.js',
+  'src/vendor/three-mocap.min.js', 'src/vendor/three.module.min.js', 'assets/sfx/punch_m0.mp3', 'assets/sfx/punch_m1.mp3', 'assets/sfx/slap0.mp3',
+  'assets/sfx/slap1.mp3', 'assets/sfx/slap2.mp3', 'assets/sfx/soft_h0.mp3', 'assets/sfx/soft_m0.mp3', 'assets/sfx/soft_m1.mp3',
 ];
 
 self.addEventListener('install', (e) => {
