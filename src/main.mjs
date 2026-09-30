@@ -102,6 +102,7 @@ function gameOver() {
 let toastT = 0;
 const tips = [];
 function toast(big, small = '', ms = 1500, tip = false) {
+  if (mode === 'settings' || mode === 'pause') return; // never over a menu
   const el = $('toast');
   el.innerHTML = '<b></b><span></span>';
   el.querySelector('b').textContent = big; el.querySelector('span').textContent = small;
