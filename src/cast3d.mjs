@@ -70,6 +70,64 @@ export function rigidMerge(root) {
   // only the bigger parts cast shadows: eyes, lashes and earrings don't need to
   root.traverse((o) => { if (o.isMesh && o.castShadow) { if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere(); if (o.geometry.boundingSphere.radius < 0.06) o.castShadow = false; } });
 }
+
+// Then the whole character becomes a few skinned meshes, one per material: every part that moved on its
+// own is now a bone, so the animation code above still turns arms, heads and pupils the same way, but a
+// tita costs a handful of draws instead of dozens. Hiding a part (visible = false) collapses its bones.
+export function skinify(root) {
+  root.updateMatrixWorld(true);
+  const rootInv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const meshes = [];
+  root.traverse((o) => { if (o.isMesh && !o.userData.real) meshes.push(o); });
+  const bones = [], index = new Map(), groups = new Map(), m4 = new THREE.Matrix4();
+  for (const m of meshes) {
+    if (!index.has(m)) { index.set(m, bones.length); bones.push(m); }
+    const bi = index.get(m);
+    let g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+    g.applyMatrix4(m4.multiplyMatrices(rootInv, m.matrixWorld));
+    const n = g.attributes.position.count;
+    g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(new Uint16Array(n * 4).map((_, i) => (i % 4 === 0 ? bi : 0)), 4));
+    g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(new Float32Array(n * 4).map((_, i) => (i % 4 === 0 ? 1 : 0)), 4));
+    // plain colours (and parts already coloured by vertex) share one material; textures, glows, glass and live colours keep their own
+    const mt = m.material, plain = mt.type === 'MeshStandardMaterial' && !mt.map && !mt.transparent && !mt.userData.live && mt.emissive.getHex() === 0 && mt.metalness < 0.5;
+    const key = plain ? 'vc' : mt;
+    if (plain && !g.attributes.color) { const col = new Float32Array(n * 3); for (let i = 0; i < n * 3; i += 3) { col[i] = mt.color.r; col[i + 1] = mt.color.g; col[i + 2] = mt.color.b; } g.setAttribute('color', new THREE.BufferAttribute(col, 3)); }
+    if (!plain && g.attributes.color && !mt.vertexColors) g.deleteAttribute('color');
+    if (!groups.has(key)) groups.set(key, { list: [], cast: false });
+    const grp = groups.get(key); grp.list.push(g); grp.cast = grp.cast || m.castShadow;
+    m.layers.disableAll(); // it stays as a bone, but never draws again
+  }
+  // visibility: keep each object's own flag, and collapse the bones under anything hidden
+  const objs = [];
+  root.traverse((o) => { if (o !== root && !o.userData.real) objs.push(o); });
+  for (const o of objs) { let shown = o.visible; o.userData.shown = () => shown; Object.defineProperty(o, 'visible', { get: () => shown, set: (v) => { shown = v; } }); }
+  const chains = bones.map((b) => { const c = []; for (let o = b; o && o !== root; o = o.parent) c.push(o); return c; });
+  const skel = new THREE.Skeleton(bones);
+  const upd = skel.update.bind(skel);
+  skel.update = () => { upd(); const bm = skel.boneMatrices; chains.forEach((c, i) => { for (const o of c) if (!o.userData.shown()) { bm.fill(0, i * 16, i * 16 + 16); break; } }); };
+  const vcMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5 });
+  for (const [key, { list, cast }] of groups) {
+    const mat = key === 'vc' ? vcMat : key;
+    const geo = mergeSkinned(list);
+    const sm = new THREE.SkinnedMesh(geo, mat);
+    sm.castShadow = cast; sm.frustumCulled = false; sm.userData.real = true;
+    root.add(sm); sm.bind(skel, root.matrixWorld);
+  }
+  // rendering must still walk into hidden groups' bones, so three sees them all as visible; the flag above does the hiding
+  for (const o of objs) if (o.isMesh) o.matrixAutoUpdate = true;
+}
+function mergeSkinned(list) {
+  const n = list.reduce((a, g) => a + g.attributes.position.count, 0), out = new THREE.BufferGeometry();
+  for (const [k, size, Arr] of [['position', 3, Float32Array], ['normal', 3, Float32Array], ['uv', 2, Float32Array], ['color', 3, Float32Array], ['skinIndex', 4, Uint16Array], ['skinWeight', 4, Float32Array]]) {
+    if (k === 'color' && !list.every((g) => g.attributes.color)) continue;
+    if (k === 'uv' && !list.some((g) => g.attributes.uv)) continue;
+    const arr = new Arr(n * size); let at = 0;
+    for (const g of list) { const a = g.attributes[k], c = g.attributes.position.count; if (a) arr.set(a.array.subarray(0, c * size), at * size); at += c; }
+    out.setAttribute(k, k === 'skinIndex' ? new THREE.Uint16BufferAttribute(arr, 4) : new THREE.BufferAttribute(arr, size));
+  }
+  return out;
+}
+
 // a limb that hangs from its pivot: a capsule from 0 down to -len
 function limb(r, len, mat) { const g = new THREE.Group(); g.add(mesh(G.cap(r, len), mat, 0, -len / 2)); return g; }
 
@@ -162,6 +220,8 @@ export function makeBata() {
   halo.rotation.x = -Math.PI / 2; halo.position.y = 0.012; root.add(halo); halo.userData.noReflect = true;
   solo(halo, mouthIn, tongue, browL, browR, ...stars.children);
   rigidMerge(root);
+  halo.userData.real = true;
+  skinify(root);
   root.traverse((o) => { if (o.isMesh) o.frustumCulled = false; });
 
   const st = { yaw: 0, spin: 0, phase: 0, bob: 0, chomp: 0, lastMouth: 0, squash: 0, turnT: 0, lastDir: -1, cheer: 0, look: 0 };
@@ -344,6 +404,7 @@ export function makeTita(i, color) {
   halo.rotation.x = -Math.PI / 2; halo.position.y = 0.014; halo.userData.noReflect = true; root.add(halo);
   solo(dress, hemTrim, lips, wobble, ghost, halo, browL, browR, ...drops);
   rigidMerge(root);
+  ghost.userData.real = halo.userData.real = true;
   root.traverse((o) => { if (o.isMesh) o.frustumCulled = false; });
   const bodyParts = [dress, hemTrim, ...feet, armL, armR, prop, hairG];
   const skinParts = [];
@@ -402,7 +463,8 @@ export function makeTita(i, color) {
       lx = clamp(Math.sin(a) * 1.4, -1, 1); ly = Math.cos(a) < 0 ? 0.3 : -0.1;
     }
     if (scared) { lx = Math.sin(t * 9 + i) * 0.9; ly = 0.4; }
-    for (const e of [eL, eR]) { lookPupil(e, lx, ly); e.pupil.scale.setScalar(scared ? 0.55 : 1); e.g.scale.setScalar(eyes ? 1.35 : 1); }
+    const pop = o.pop || 0, popS = 1 + Math.sin(Math.min(1, pop * 1.3) * Math.PI * 0.5) * pop * 0.9; // eyes popping wide in fear, settling back
+    for (const e of [eL, eR]) { lookPupil(e, lx, ly); e.pupil.scale.setScalar(scared ? 0.55 * (1 - pop * 0.3) : 1); e.g.scale.setScalar((eyes ? 1.35 : 1) * popS); }
     // brows: knitted in a chase, raised in a fright, easy when she heads for her corner
     const angry = o.mode === 'chase' ? 1 : 0;
     browL.rotation.z = Math.PI / 2 + (scared ? -0.35 : angry ? 0.4 : 0.1); browR.rotation.z = Math.PI / 2 - (scared ? -0.35 : angry ? 0.4 : 0.1);
@@ -413,5 +475,6 @@ export function makeTita(i, color) {
     if (o.gossip) head.rotation.y = Math.sin(t * 1.3 + i * 2) * 0.5;
     ghost.position.y = 0.25; ghostM.opacity = 0.16 + Math.sin(t * 8) * 0.05;
   }
+  skinify(root);
   return { root, update, head, color: base };
 }

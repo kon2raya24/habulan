@@ -259,3 +259,40 @@ export function tarpMesh(w, d, mat, { sagBy = 0.12, tilt = 0 } = {}) {
   const m = mesh(g, mat, { cast: true, receive: true });
   return m;
 }
+
+// ---------- baking: many small things, each with its own colour, into one mesh per material ----------
+// Stall produce, eggs, fish, shoes and food-court trays are thousands of little shapes; baked with their
+// colours in the vertices, a whole place's worth costs two or three draws.
+export function baker() {
+  const buckets = new Map(), flat = new Map(), m4 = new THREE.Matrix4(), nm = new THREE.Matrix3(), q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3(), sc = new THREE.Vector3(), c = new THREE.Color();
+  const tpl = (g) => { if (!flat.has(g)) flat.set(g, g.index ? g.toNonIndexed() : g); return flat.get(g); };
+  return {
+    // s: a number or [x, y, z]; vary: how much the colour's brightness wanders from piece to piece
+    add(bucket, geo, color, x, y, z, { rx = 0, ry = 0, rz = 0, s = 1, vary = 0.08, k = 1 } = {}) {
+      if (!buckets.has(bucket)) buckets.set(bucket, []);
+      e.set(rx, ry, rz); q.setFromEuler(e); p.set(x, y, z); if (Array.isArray(s)) sc.set(...s); else sc.setScalar(s);
+      c.set(color).multiplyScalar(k * (1 + (Math.random() * 2 - 1) * vary));
+      buckets.get(bucket).push({ g: tpl(geo), m: m4.compose(p, q, sc).clone(), c: [c.r, c.g, c.b] });
+    },
+    build(group, mats, { cast = false, noReflect = true } = {}) {
+      for (const [bucket, list] of buckets) {
+        const n = list.reduce((a, it) => a + it.g.attributes.position.count, 0);
+        const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), uv = new Float32Array(n * 2), col = new Float32Array(n * 3), v = new THREE.Vector3();
+        let at = 0;
+        for (const it of list) {
+          const P = it.g.attributes.position, N = it.g.attributes.normal, U = it.g.attributes.uv; nm.getNormalMatrix(it.m);
+          for (let i = 0; i < P.count; i++, at++) {
+            v.fromBufferAttribute(P, i).applyMatrix4(it.m); pos[at * 3] = v.x; pos[at * 3 + 1] = v.y; pos[at * 3 + 2] = v.z;
+            v.fromBufferAttribute(N, i).applyMatrix3(nm).normalize(); nor[at * 3] = v.x; nor[at * 3 + 1] = v.y; nor[at * 3 + 2] = v.z;
+            if (U) { uv[at * 2] = U.getX(i); uv[at * 2 + 1] = U.getY(i); }
+            col[at * 3] = it.c[0]; col[at * 3 + 1] = it.c[1]; col[at * 3 + 2] = it.c[2];
+          }
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        const m = new THREE.Mesh(geo, mats[bucket] || mats.matte); m.castShadow = cast; m.receiveShadow = true; m.userData.keep = true; m.userData.noReflect = noReflect; m.name = 'baked:' + bucket;
+        group.add(m);
+      }
+    },
+  };
+}

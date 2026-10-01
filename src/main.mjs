@@ -1,8 +1,8 @@
 // The page: screens, difficulty, settings, input (keys, swipes, the d-pad, a controller), the loop,
 // sound, the best score and hints. The rules live in game.mjs; the 3D palengke in view3d.mjs. If WebGL
 // can't start, the old 2D board (render.mjs) plays the same game.
-import { createGame, step, steer, nextLevel, DIFFICULTY, TITAS, FRUITS, UP, LEFT, DOWN, RIGHT } from './game.mjs';
-import { mazeFor } from './maps.mjs';
+import { createGame, step, steer, nextLevel, posOf, DIFFICULTY, TITAS, FRUITS, UP, LEFT, DOWN, RIGHT } from './game.mjs';
+import { mazeFor, COLS } from './maps.mjs';
 import { bot } from './bot.mjs';
 import { createRenderer } from './render.mjs';
 import { createAudio } from './audio.mjs';
@@ -101,9 +101,10 @@ function gameOver() {
 // ---------- toasts and hints ----------
 let toastT = 0;
 const tips = [];
-function toast(big, small = '', ms = 1500, tip = false) {
+function toast(big, small = '', ms = 1500, tip = false, grow = 1) {
   if (mode === 'settings' || mode === 'pause') return; // never over a menu
   const el = $('toast');
+  el.style.setProperty('--grow', String(grow));
   el.innerHTML = '<b></b><span></span>';
   el.querySelector('b').textContent = big; el.querySelector('span').textContent = small;
   el.classList.toggle('tip', tip);
@@ -116,8 +117,8 @@ function onEvent(e) {
   V.event(e, game);
   switch (e.type) {
     case 'pellet': A.pellet(); eatenAll++; break;
-    case 'power': A.power(); buzz(30); hint('power', 'Tsinelas ni Nanay! Habulin mo ang mga tita habang takot sila.'); break;
-    case 'ghost': A.ghost(); buzz(20); if (e.chain >= 4) toast('Lahat sila!', `+${e.points}`, 1200); break;
+    case 'power': A.power(); A.nanay(); buzz(30); slowT = reduced() ? 0 : 0.55; toast('Anaaak!', 'Tsinelas ko \'yan! — Nanay', 1300, false, 0.8); hint('power', 'Tsinelas ni Nanay! Habulin mo ang mga tita habang takot sila.'); break;
+    case 'ghost': A.ghost(e.chain); buzz(20 + e.chain * 10); toast(['Pak!', 'Pak! Pak!', 'Pak! Pak! Pak!', 'Sapol lahat!'][Math.min(3, e.chain - 1)], `+${e.points}${e.chain > 1 ? ` · combo ×${e.chain}` : ''}`, 1000, false, 0.75 + e.chain * 0.18); break;
     case 'fruitshow': hint('fruit', 'May prutas sa gitna! Kunin bago mawala.'); break;
     case 'fruit': A.fruit(); toast(FRUITS.find((f) => f.id === e.fruit).name + '!', `+${e.points}`, 1000); break;
     case 'extra': A.extra(); toast('Extra buhay!', 'Dagdag na buhay', 1400); break;
@@ -248,14 +249,30 @@ function hud(g) {
 }
 
 // ---------- loop ----------
-let last = performance.now(), t = 0, demoWait = 0;
+let last = performance.now(), t = 0, demoWait = 0, slowT = 0;
+// a close call: a chasing tita within a tile of you who didn't catch you (once per pass, per tita)
+const near = [0, 0, 0, 0];
+function closeCalls(g, dt) {
+  if (g.dying || g.pause > 0) return;
+  const p = posOf(g.player);
+  g.ghosts.forEach((gh, i) => {
+    near[i] = Math.max(0, near[i] - dt);
+    if (gh.mode !== 'active' || gh.fright) return;
+    const q = posOf(gh); let dx = Math.abs(p.x - q.x); if (dx > COLS / 2) dx = COLS - dx;
+    const d = dx + Math.abs(p.y - q.y);
+    if (d < 1.15 && near[i] <= 0) { near[i] = 2.5; V.closeCall?.(i); A.closeCall(); buzz(12); }
+  });
+}
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now; t += dt;
   readPad(dt);
   if (game && mode === 'play') {
     if (AUTOPLAY) steer(game, bot(game));
-    for (const e of step(game, dt)) onEvent(e);
+    // a beat of slow motion when Nanay's tsinelas comes out
+    slowT = Math.max(0, slowT - dt);
+    for (const e of step(game, slowT > 0 ? dt * 0.35 : dt)) onEvent(e);
+    if (mode === 'play') closeCalls(game, dt);
   } else if (game && mode === 'intro') {
     introT += dt;
     if (introT >= introDur) endIntro();

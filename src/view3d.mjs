@@ -12,7 +12,7 @@ import { posOf, TITAS, FRUITS } from './game.mjs';
 import { createPost } from './post.mjs';
 import { buildWorld, THEME_OF, LOOKS } from './world3d.mjs';
 import { makeBata, makeTita, DIR_YAW } from './cast3d.mjs';
-import { createPellets, createPower, createFruit } from './food3d.mjs';
+import { createPellets, createPowers, createFruit } from './food3d.mjs';
 import { envSky, envBackdrop } from './envpack.mjs';
 import * as T from './tex.mjs';
 
@@ -65,7 +65,7 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
   // ---------- the cast ----------
   const bata = makeBata(); bata.root.userData.s = 1.4; scene.add(bata.root);
   const titas = TITAS.map((t, i) => { const m = makeTita(i, t.color); m.root.scale.setScalar(1.35); scene.add(m.root); return m; });
-  const powers = [0, 1, 2, 3].map(() => { const p = createPower(); scene.add(p.group); return p; });
+  const powers = createPowers(4); scene.add(powers.group);
   const fruit = createFruit(); scene.add(fruit.group); fruit.group.position.set(X(FRUIT.x), 0, Z(FRUIT.y));
   let pellets = null;
 
@@ -177,12 +177,11 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
   // ---------- the wet floor's reflection (high graphics) ----------
   const mirror = { rt: null, cam: new THREE.PerspectiveCamera(), matrix: new THREE.Matrix4(), on: false };
   let mirrorDirty = true;
-  const hideForMirror = [];
   function renderMirror() {
-    const want = level >= 2 && world && world.floor;
+    const want = level >= 2 && !low && world && world.floor; // desktops only: phones keep the glossy floor without the second pass
     const U = world && world.floor && world.floor.material.userData.floorU;
     if (!want) { if (U) U.mirrorOn.value = 0; return; }
-    const w = Math.max(64, Math.floor(renderer.domElement.width * 0.5)), h = Math.max(64, Math.floor(renderer.domElement.height * 0.5));
+    const w = Math.max(64, Math.floor(renderer.domElement.width * 0.38)), h = Math.max(64, Math.floor(renderer.domElement.height * 0.38)); // the floor's ripples blur it anyway
     if (!mirror.rt) mirror.rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType });
     if (mirror.rt.width !== w || mirror.rt.height !== h) mirror.rt.setSize(w, h);
     // the camera, mirrored in the floor (y = 0)
@@ -196,16 +195,18 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.001).applyMatrix4(c.matrixWorldInverse);
     const cp = new THREE.Vector4(plane.normal.x, plane.normal.y, plane.normal.z, plane.constant), P = c.projectionMatrix, q = new THREE.Vector4((Math.sign(cp.x) + P.elements[8]) / P.elements[0], (Math.sign(cp.y) + P.elements[9]) / P.elements[5], -1, (1 + P.elements[10]) / P.elements[14]);
     cp.multiplyScalar(2 / cp.dot(q)); P.elements[2] = cp.x; P.elements[6] = cp.y; P.elements[10] = cp.z + 1; P.elements[14] = cp.w;
-    if (mirrorDirty) { hideForMirror.length = 0; scene.traverse((o) => { if (o.userData.noReflect || o.userData.isFloor || o.isSprite || o.isPoints) hideForMirror.push(o); }); mirrorDirty = false; }
-    const was = hideForMirror.map((o) => o.visible);
-    for (const o of hideForMirror) o.visible = false;
-    for (const s of floats) s.visible = false;
+    // only what reads in a puddle is drawn into it (layer 2): the cast, the walls and their lips, the lights, the sky
+    if (mirrorDirty) {
+      scene.traverse((o) => { if ((o.isSkinnedMesh || o.userData.wall || o === sky || /^(bulb|parol|candle|flame|lamppost|pole)/.test(o.name || '')) && !o.userData.noReflect) o.layers.enable(2); });
+      mirrorDirty = false;
+    }
+    c.layers.set(2);
     const auto = renderer.shadowMap.autoUpdate; renderer.shadowMap.autoUpdate = false;
     const fog = scene.fog.density; scene.fog.density = fog * 1.15;
+    const before = renderer.info.render.triangles, bc = renderer.info.render.calls;
     renderer.setRenderTarget(mirror.rt); renderer.clear(); renderer.render(scene, c); renderer.setRenderTarget(null);
+    debug.mirror = { calls: renderer.info.render.calls - bc, tris: renderer.info.render.triangles - before };
     scene.fog.density = fog; renderer.shadowMap.autoUpdate = auto;
-    hideForMirror.forEach((o, i) => { o.visible = was[i]; });
-    for (const s of floats) s.visible = true;
     U.mirrorMap.value = mirror.rt.texture; U.mirrorMatrix.value.copy(mirror.matrix); U.mirrorOn.value = 1;
   }
 
@@ -213,25 +214,27 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
   const cam = { pos: new THREE.Vector3(0, 30, 30), look: new THREE.Vector3(0, 0, 0), tgt: new THREE.Vector3(), vel: new THREE.Vector3(), shake: 0, punch: 0, punchAt: new THREE.Vector3(), flash: 0, cool: 0, grey: 0, mode: '', t: 0, from: null };
   let ELEV = 0.99; // radians above the floor (57°; steeper on a tall screen)
   // how far back the camera stands to show at least `wv` columns and `hv` rows
-  function framing(wv, hv) {
+  function framing(wv, hv, el = ELEV) {
     const tan = Math.tan((camera.fov * Math.PI) / 360), a = camera.aspect;
-    const d = Math.max(wv / 2 / (tan * a), (hv / 2) * Math.sin(ELEV) / tan);
-    return { d, halfW: d * tan * a, halfH: d * tan / Math.sin(ELEV) };
+    const d = Math.max(wv / 2 / (tan * a), (hv / 2) * Math.sin(el) / tan);
+    return { d, halfW: d * tan * a, halfH: d * tan / Math.sin(el) };
   }
   function playPose(g, o, out) {
     const full = o.camMode === 'full', portrait = camera.aspect < 0.8;
-    const f = full ? framing(COLS + 2, ROWS + 3) : portrait ? framing(14.5, 18) : framing(15, 15.5);
+    // the whole maze on a tall screen: nearly straight down, so it can fill the width without the far rows shrinking
+    const el = full && portrait ? 1.4 : ELEV;
+    const f = full ? (portrait ? framing(COLS + 0.6, ROWS + 1, el) : framing(COLS + 2, ROWS + 3)) : portrait ? framing(14.5, 18) : framing(15, 15.5);
     const pl = g.player, p = posOf(pl);
     let tx = X(clamp(p.x, 0, COLS - 1)), tz = Z(clamp(p.y, 0, ROWS - 1));
     if (!full) { tx += [0, -1, 0, 1][pl.dir] * 1.2; tz += [-1, 0, 1, 0][pl.dir] * 1.2; }
     const mx = COLS / 2 + 1.2, mz = ROWS / 2 + 1.4;
     tx = f.halfW >= mx ? tx * 0.12 : clamp(tx, -(mx - f.halfW), mx - f.halfW);
-    tz = f.halfH >= mz ? tz * 0.08 : clamp(tz, -(mz - f.halfH), mz - f.halfH);
+    tz = f.halfH >= mz ? tz * 0.08 : clamp(tz, -(mz - f.halfH) - 1.3, mz - f.halfH); // a little further north, so the top rows clear the HUD
     if (full) { tx = 0; tz = 0.3; }
     // the HUD sits along the top and the touch pad at the bottom: keep the action between them
-    tz += o.touch ? (portrait ? 2.2 : 1.2) : 0.35;
+    tz += full && portrait ? (o.touch ? 3.4 : 1.2) : o.touch ? (portrait ? 2.2 : 1.2) : 0.35;
     out.look.set(tx, 0, tz);
-    out.pos.set(tx, Math.sin(ELEV) * f.d, tz + Math.cos(ELEV) * f.d);
+    out.pos.set(tx, Math.sin(el) * f.d, tz + Math.cos(el) * f.d);
     return out;
   }
   const pose = { pos: new THREE.Vector3(), look: new THREE.Vector3() }, pose2 = { pos: new THREE.Vector3(), look: new THREE.Vector3() };
@@ -272,13 +275,14 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
         ring(p.x, p.z, '#7fd8ff');
         cam.shake = Math.max(cam.shake, 0.18); cam.flash = 0.5; cam.cool = 1;
         for (const gh of g.ghosts) if (gh.mode === 'active' && Math.random() < 0.6) bark(gh.i, pick(SCARED), TITAS[gh.i].color);
+        for (const m of titas) m.pop = 1; // their eyes pop in fear
         break;
       }
       case 'ghost': {
         const p = at(e.x, e.y), col = TITAS.find((t) => t.id === e.id).color;
         emit(glows, p.x, 0.5, p.z, col, 26, { speed: 4, up: 3, life: 0.6, size: 0.26, g: 4 });
         emit(bits, p.x, 0.5, p.z, '#ffffff', 16, { speed: 3.5, up: 3, life: 0.6, size: 0.07, g: 8 });
-        impact(p.x, p.z);
+        impact(p.x, p.z, e.chain);
         floatText(String(e.points), p.x, 1.2, p.z, { size: 0.8 + e.chain * 0.18, color: ['#e8fbff', '#7fd8ff', '#2f6fd6'] });
         cam.shake = Math.max(cam.shake, 0.22 + e.chain * 0.04); cam.punch = 1; cam.punchAt.copy(p); cam.flash = 0.35;
         bark(TITAS.findIndex((t) => t.id === e.id), pick(OUCH), col);
@@ -303,8 +307,8 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
     const m = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.5, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
     m.position.set(x, 0.05, z); m.userData = { t: 0, noReflect: true, ring: true }; scene.add(m); effects.push(m);
   }
-  function impact(x, z) { // a white star burst: PAK!
-    const m = new THREE.Mesh(new THREE.ShapeGeometry(T.starShape(0.7, 0.28)), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+  function impact(x, z, chain = 1) { // a white star burst: PAK! (bigger with every tita in the combo)
+    const s0 = 0.7 + chain * 0.22, m = new THREE.Mesh(new THREE.ShapeGeometry(T.starShape(s0, s0 * 0.4)), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending, toneMapped: false }));
     m.position.set(x, 0.7, z); m.userData = { t: 0, noReflect: true, star: true }; m.renderOrder = 15; scene.add(m); effects.push(m);
   }
   function confetti(x, z) { const C = ['#e8384f', '#ffd23f', '#2f9bff', '#3fcf6a', '#ff7eb6', '#ffffff']; for (const c of C) emit(bits, x + (Math.random() - 0.5) * 6, 4, z + (Math.random() - 0.5) * 4, c, 10, { speed: 2.5, up: 1.5, life: 2.2, g: 2.2, size: 0.09, drag: 0.94 }); }
@@ -330,7 +334,7 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
     pellets = createPellets(list.length); pellets.set(list); scene.add(pellets.buns, pellets.pools);
     const pw = [];
     g.maze.rows.forEach((row, y) => [...row].forEach((c, x) => { if (c === 'o') pw.push(y * COLS + x); }));
-    powers.forEach((p, i) => { p.k = pw[i]; const k = pw[i] ?? 0; p.group.position.set(X(k % COLS), 0, Z(Math.floor(k / COLS))); });
+    powers.slots.forEach((p, i) => { p.k = pw[i]; const k = pw[i] ?? 0; p.x = X(k % COLS); p.z = Z(Math.floor(k / COLS)); });
     mirrorDirty = true;
     fruit.hide();
   }
@@ -360,7 +364,8 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
     const adt = frozen ? 0 : dt; // hit-stop: the world holds its breath while a tita is eaten
     // pellets and power-ups follow the game
     if (pellets) { for (const s of pellets.slots) if (s.alive && !g.pellets[s.k]) pellets.eat(s.k); pellets.update(dt, t, reduced); }
-    powers.forEach((p, i) => { p.group.visible = p.k !== undefined && g.pellets[p.k] === 2; if (p.group.visible) p.update(t, reduced, i); });
+    for (const p of powers.slots) p.on = p.k !== undefined && g.pellets[p.k] === 2;
+    powers.update(t, reduced);
     if (g.fruit) { fruit.show(g.fruit.id, t); fruit.update(t, reduced, g.fruit.t); } else { fruit.hide(); fruit.update(t, reduced); }
     // the bata
     const pl = g.player, pp = posOf(pl), dying = g.dying > 0 ? 1 - g.dying / 1.6 : g.over ? 1 : 0;
@@ -380,7 +385,8 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
       if (o.mode === 'over') { const spot = gatherSpots(g, pp)[i]; x = spot.x; z = spot.z; face = Math.atan2(bx - x, bz - z); mode = 'scatter'; speed = 0; }
       if (gh.mode === 'house' && !reduced) y = 0;
       m.root.visible = !g.cleared || celebrate <= 0 ? true : false;
-      m.update({ x, z, y, dir, mode, face, speed, toward: { x: bx, z: bz }, reduced, gossip }, frozen ? 0 : dt, t);
+      m.pop = Math.max(0, (m.pop || 0) - dt * 1.4);
+      m.update({ x, z, y, dir, mode, face, speed, toward: { x: bx, z: bz }, reduced, gossip, pop: reduced ? 0 : m.pop }, frozen ? 0 : dt, t);
       // a tita now and then calls out while she chases
     });
     if (o.mode === 'play' && !g.pause && !g.dying) {
@@ -482,11 +488,14 @@ export function createView(canvas, { low = false, gfx = null } = {}) {
     cam.flash = Math.max(0, cam.flash - dt * 3);
     cam.cool = lerp(cam.cool, g.frightT > 0 ? 0.55 : 0, 1 - Math.exp(-dt * 4));
     cam.grey = g.dying > 0 ? Math.min(1, cam.grey + dt * 3) * (g.dying < 0.3 ? g.dying / 0.3 : 1) : Math.max(0, cam.grey - dt * 2);
+    renderer.info.autoReset = false; renderer.info.reset();
     renderMirror();
     post.render(dt, { flash: reduced ? 0 : cam.flash, split: reduced ? 0 : Math.max(cam.punch * 0.3, cam.flash * 0.5), cool: cam.cool, grey: o.mode === 'over' ? 0 : cam.grey * 0.8, bloomBoost: celebrate > 0 ? 0.3 : g.frightT > 0 ? 0.08 : 0 });
   }
 
-  const debug = { cam: null };
+  const debug = { cam: null, get stats() { return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles }; } };
   resize();
-  return { frame, resize, event, renderer, post, scene, camera, setEnv, debug, bark, get world() { return world; }, get level() { return level; } };
+  // a tita brushed past: a little jolt, and she has something to say
+  function closeCall(i) { cam.shake = Math.max(cam.shake, 0.09); if (Math.random() < 0.5) bark(i, pick(['Muntik na!', 'Halos!', 'Sayang!']), TITAS[i].color); }
+  return { frame, resize, event, closeCall, renderer, post, scene, camera, setEnv, debug, bark, get world() { return world; }, get level() { return level; } };
 }

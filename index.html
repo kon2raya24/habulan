@@ -49,7 +49,7 @@ body.touch .hud-low { bottom: calc(max(10px, env(safe-area-inset-bottom)) + 150p
 @keyframes blinkbar { 50% { background: #fff; } }
 #fright-label { position: absolute; left: 50%; top: calc(max(10px, env(safe-area-inset-top)) + 80px); transform: translateX(-50%); font: italic 900 13px/1 "Barlow Condensed", sans-serif; letter-spacing: .16em; color: #bff0ff; text-shadow: 0 2px 0 #120d14; white-space: nowrap; }
 #toast { position: absolute; left: 50%; top: 26%; transform: translateX(-50%); text-align: center; pointer-events: none; text-shadow: 0 3px 0 rgba(0,0,0,.5), 0 0 18px rgba(0,0,0,.35); width: max-content; max-width: 94vw; z-index: 3; }
-#toast b { display: block; text-shadow: none; font: italic 900 clamp(40px, 10vw, 84px)/.9 "Barlow Condensed", sans-serif; text-transform: uppercase; background: linear-gradient(180deg, #fffbe0 0%, #ffd23f 42%, #e8741c 58%, #fff0b0 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0 5px 0 #120d14) drop-shadow(0 0 24px rgba(255,140,40,.5)); }
+#toast b { display: block; text-shadow: none; font: italic 900 calc(clamp(40px, 10vw, 84px) * var(--grow, 1))/.9 "Barlow Condensed", sans-serif; text-transform: uppercase; background: linear-gradient(180deg, #fffbe0 0%, #ffd23f 42%, #e8741c 58%, #fff0b0 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0 5px 0 #120d14) drop-shadow(0 0 24px rgba(255,140,40,.5)); }
 #toast span { display: block; font: italic 800 clamp(15px, 3.4vw, 22px)/1.1 "Barlow Condensed", sans-serif; letter-spacing: .1em; margin-top: 8px; color: #fff; }
 #toast.tip b { font-size: clamp(22px, 5vw, 32px); }
 #toast.pop { animation: pop .42s cubic-bezier(.2,1.4,.4,1); }

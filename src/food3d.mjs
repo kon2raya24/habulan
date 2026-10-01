@@ -18,7 +18,7 @@ function mesh(geo, mat, x = 0, y = 0, z = 0, o = {}) {
 
 // A roll of pan de sal: round on top, flat where it sat on the tray, a seam down the middle.
 function bunGeometry() {
-  const g = new THREE.SphereGeometry(1, 12, 8), p = g.attributes.position;
+  const g = new THREE.SphereGeometry(1, 10, 6), p = g.attributes.position;
   for (let i = 0; i < p.count; i++) {
     let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
     y = y < 0 ? y * 0.35 : y * 0.72;
@@ -80,7 +80,7 @@ export function createPower() {
   const beamM = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
     uniforms: { color: { value: new THREE.Color('#7fd8ff') }, k: { value: 1 } },
-    vertexShader: 'varying float vy; varying vec3 vn, vv; void main(){ vy = position.y / 1.6; vec4 mv = modelViewMatrix * vec4(position, 1.0); vn = normalize(normalMatrix * normal); vv = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }',
+    vertexShader: 'varying float vy; varying vec3 vn, vv; void main(){ vy = position.y / 1.6; vec4 p = vec4(position, 1.0); vec3 nn = normal;\n#ifdef USE_INSTANCING\n p = instanceMatrix * p; nn = mat3(instanceMatrix) * nn;\n#endif\n vec4 mv = modelViewMatrix * p; vn = normalize(normalMatrix * nn); vv = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }',
     fragmentShader: 'uniform vec3 color; uniform float k; varying float vy; varying vec3 vn, vv; void main(){ float f = pow(1.0 - abs(dot(vn, vv)), 1.5); gl_FragColor = vec4(color * (1.0 - vy) * (1.0 - vy) * (0.25 + f * 0.5) * k, 1.0); }',
   });
   const beam = new THREE.Mesh(beamGeo, beamM); beam.userData.noReflect = true; g.add(beam);
@@ -92,6 +92,41 @@ export function createPower() {
       pair.scale.setScalar(p);
       ring.scale.setScalar(p); band.scale.setScalar(1 + ((t * 0.7 + i * 0.25) % 1) * 0.6); band.material.opacity = 0.8 * (1 - ((t * 0.7 + i * 0.25) % 1));
       beamM.uniforms.k.value = 0.8 + Math.sin(t * 4 + i) * 0.2;
+    },
+  };
+}
+
+// All of Nanay's tsinelas in a maze as instances: the four pairs, their rings and their columns of light
+// cost six draws together.
+export function createPowers(n = 4) {
+  const tpl = createPower(), group = new THREE.Group(), parts = [], d = new THREE.Object3D();
+  tpl.group.updateMatrixWorld(true);
+  tpl.group.traverse((o) => {
+    if (!o.isMesh) return;
+    const inPair = o.parent !== tpl.group, geo = o.geometry.clone();
+    if (inPair) { o.updateMatrix(); geo.applyMatrix4(o.matrix); }
+    const im = new THREE.InstancedMesh(geo, o.material, n); im.frustumCulled = false; im.userData.noReflect = o.userData.noReflect; im.castShadow = false;
+    if (o.material.blending === THREE.AdditiveBlending && o.material.isMeshBasicMaterial) for (let i = 0; i < n; i++) im.setColorAt(i, new THREE.Color(1, 1, 1));
+    group.add(im); parts.push({ im, inPair, kind: o.geometry.type === 'RingGeometry' ? 'band' : o.geometry.type === 'CylinderGeometry' && !inPair ? 'beam' : inPair ? 'pair' : 'ring', base: o.position.y });
+  });
+  const beamM = parts.find((p) => p.kind === 'beam').im.material;
+  const slots = Array.from({ length: n }, () => ({ x: 0, z: 0, on: false, k: undefined }));
+  const c = new THREE.Color();
+  return {
+    group, slots,
+    update(t, reduced) {
+      slots.forEach((sl, i) => {
+        const p = reduced ? 1 : 1 + Math.sin(t * 6 + i) * 0.1, ph = (t * 0.7 + i * 0.25) % 1, s0 = sl.on ? 1 : 0;
+        for (const q of parts) {
+          if (q.kind === 'pair') { d.position.set(sl.x, reduced ? 0.05 : 0.06 + Math.sin(t * 3 + i) * 0.05, sl.z); d.rotation.set(0, reduced ? 0.6 : t * 1.8 + i, 0); d.scale.setScalar(p * s0); }
+          else if (q.kind === 'ring') { d.position.set(sl.x, q.base, sl.z); d.rotation.set(0, 0, 0); d.scale.setScalar(p * s0); }
+          else if (q.kind === 'band') { d.position.set(sl.x, q.base, sl.z); d.rotation.set(0, 0, 0); d.scale.setScalar((1 + ph * 0.6) * s0); q.im.setColorAt(i, c.setScalar(0.8 * (1 - ph))); }
+          else { d.position.set(sl.x, 0, sl.z); d.rotation.set(0, 0, 0); d.scale.setScalar(s0); }
+          d.updateMatrix(); q.im.setMatrixAt(i, d.matrix);
+        }
+      });
+      for (const q of parts) { q.im.instanceMatrix.needsUpdate = true; if (q.im.instanceColor) q.im.instanceColor.needsUpdate = true; }
+      beamM.uniforms.k.value = 0.8 + Math.sin(t * 4) * 0.2;
     },
   };
 }
